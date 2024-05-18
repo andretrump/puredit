@@ -41,6 +41,8 @@ export const projectionState = StateField.define<ProjectionState>({
   },
 
   update({ config, patternMap, decorations }, transaction) {
+    console.time("update");
+
     const isCompletion = Boolean(transaction.annotation(pickedCompletion));
     decorations = decorations.map(transaction.changes);
     const state = transaction.state;
@@ -59,6 +61,7 @@ export const projectionState = StateField.define<ProjectionState>({
       .setMatches(matches);
     decorations = decorationSetBuilder.build();
 
+    console.timeEnd("update");
     return { config, patternMap, decorations, contextVariableRanges };
   },
 

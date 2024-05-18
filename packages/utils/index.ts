@@ -16,7 +16,7 @@ export function assert(condition: boolean, msg: string): asserts condition {
 
 export function* zip<A, B>(a: A[], b: B[]): Generator<[A, B], void> {
   if (a.length !== b.length) {
-    console.warn("Zipping two differently sized arrays");
+    //console.warn("Zipping two differently sized arrays");
   }
   for (let i = 0; i < a.length && i < b.length; i++) {
     yield [a[i], b[i]];
