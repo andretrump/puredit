@@ -36,7 +36,7 @@ filtered_students = (students.select(
         "last_name",
         pl.col("semster").avg()
     ).rename({"last_name": "LastName"})
-    .drop("LastName")
+    .drop("LastNamevervrefewfhwefme")
 )
 
 # CONTEXT: { "item": "string", "item_price": "number", "quantity": "number" }

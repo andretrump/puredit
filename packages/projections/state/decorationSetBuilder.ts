@@ -1,6 +1,5 @@
-import type { EditorState } from "@codemirror/state";
-import { Decoration } from "@codemirror/view";
-import type { DecorationSet } from "@codemirror/view";
+import { RangeSet, type EditorState } from "@codemirror/state";
+import { Decoration, DecorationSet } from "@codemirror/view";
 import { zip } from "@puredit/utils";
 import type { Match, Pattern } from "@puredit/parser";
 import type { CodeRange } from "@puredit/parser/match/types";
@@ -95,7 +94,7 @@ export default class DecorationSetBuilder {
         this.extractPostfixDecoratorFor(match, postfixWidget, context);
       }
     }
-    return this.newDecorations;
+    return RangeSet.join([this.newDecorations, this.decorations]);
   }
 
   private removeContextOutOfBoundsFor(match: Match) {
@@ -268,6 +267,9 @@ export default class DecorationSetBuilder {
         this.newDecorations = this.newDecorations.update({
           add: [decoration.range(range.from, range.to)],
         });
+        this.decorations = this.decorations.update({
+          filter: (_, __, currentDecoration) => currentDecoration !== decoration,
+        });
         found = true;
         return false;
       }
@@ -324,6 +326,9 @@ export default class DecorationSetBuilder {
         this.newDecorations = this.newDecorations.update({
           add: [decoration.range(match.to, match.to)],
         });
+        this.decorations = this.decorations.update({
+          filter: (_, __, currentDecoration) => currentDecoration !== decoration,
+        });
         found = true;
         return false;
       }
@@ -379,6 +384,9 @@ export default class DecorationSetBuilder {
         widget.set(match, contextInformation, this.state);
         this.newDecorations = this.newDecorations.update({
           add: [decoration.range(match.from, match.from)],
+        });
+        this.decorations = this.decorations.update({
+          filter: (_, __, currentDecoration) => currentDecoration !== decoration,
         });
         found = true;
         return false;
