@@ -1,10 +1,4 @@
-import {
-  EditorState,
-  RangeSetBuilder,
-  StateEffect,
-  StateField,
-  Transaction,
-} from "@codemirror/state";
+import { EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { PatternMatching } from "@puredit/parser";
@@ -20,6 +14,9 @@ import ProjectionRegistry from "../projectionRegistry";
 
 import { logProvider } from "../../../logconfig";
 const logger = logProvider.getLogger("projections.state.state");
+
+const LAZY_MATCHING = true;
+const measurements: number[] = [];
 
 export interface ProjectionState {
   config: ProjectionPluginConfig;
@@ -92,58 +89,74 @@ export const projectionState = StateField.define<ProjectionState>({
       }
     }
 
-    if (!transaction.docChanged && !transaction.selection && !forceRematch) {
-      logger.debug("Rematching nothing");
-      return { config, decorations, contextVariableRanges };
-    }
-    const mainSelect = transaction.selection?.main;
-    let nodesToRematch: AstNode[] = [];
+    let allMatches: Match[] = [];
+    let allContextVariableRanges: ContextVariableRange[] = [];
     let nodesToInvalidate: AstNode[] = [];
-    if (forceRematch) {
-      nodesToRematch = getAllStatementNodes(newState.sliceDoc(0), config.parser);
-      nodesToInvalidate = nodesToRematch;
-      logger.debug("Projections changed. Rematching everything");
-    } else if (transaction.docChanged) {
-      const { changedStatementNodes, errorNodes } = analyzeChanges(
-        oldState.sliceDoc(0),
-        newState.sliceDoc(0),
-        config.parser
-      );
-      nodesToRematch = changedStatementNodes;
-      nodesToInvalidate = errorNodes.concat(changedStatementNodes);
-      logger.debug(
-        `Rematching ${nodesToRematch.length} changed nodes, invalidating ${nodesToInvalidate.length} nodes`
-      );
-    } else if (mainSelect && mainSelect.anchor === mainSelect.head) {
-      // TODO: Implement partial rematching for selection of size > 0
-      logger.debug("Searching node with cursor");
-      const nodeWithCursor = findNodeContainingCursor(
-        newState.sliceDoc(0),
-        transaction.selection?.main.anchor,
-        config.parser
-      );
-      if (nodeWithCursor) {
-        const cursorNodeHasError = containsError(nodeWithCursor);
-        if (cursorNodeHasError) {
-          nodesToInvalidate = [nodeWithCursor];
-          logger.debug("Invalidating node with cursor");
+
+    const startTime = Date.now();
+    const RECORD = true;
+    if (LAZY_MATCHING) {
+      if (!transaction.docChanged && !transaction.selection && !forceRematch) {
+        logger.debug("Rematching nothing");
+        return { config, decorations, contextVariableRanges };
+      }
+      const mainSelect = newState.selection.main;
+      let nodesToRematch: AstNode[] = [];
+      if (forceRematch) {
+        nodesToRematch = getAllStatementNodes(newState.sliceDoc(0), config.parser);
+        nodesToInvalidate = nodesToRematch;
+        logger.debug("Projections changed. Rematching everything");
+      } else if (transaction.docChanged) {
+        const { changedStatementNodes, errorNodes } = analyzeChanges(
+          oldState.sliceDoc(0),
+          newState.sliceDoc(0),
+          config.parser
+        );
+        nodesToRematch = changedStatementNodes;
+        nodesToInvalidate = errorNodes.concat(changedStatementNodes);
+        logger.debug(
+          `Rematching ${nodesToRematch.length} changed nodes, invalidating ${nodesToInvalidate.length} nodes`
+        );
+      } else if (mainSelect && mainSelect.anchor === mainSelect.head) {
+        // TODO: Implement partial rematching for selection of size > 0
+        logger.debug("Searching node with cursor");
+        const nodeWithCursor = findNodeContainingCursor(
+          newState.sliceDoc(0),
+          mainSelect.anchor,
+          config.parser
+        );
+        if (nodeWithCursor) {
+          const cursorNodeHasError = containsError(nodeWithCursor);
+          if (cursorNodeHasError) {
+            nodesToInvalidate = [nodeWithCursor];
+            logger.debug("Invalidating node with cursor");
+          } else {
+            nodesToRematch = [nodeWithCursor];
+            logger.debug("Rematching node with cursor");
+          }
         } else {
-          nodesToRematch = [nodeWithCursor];
-          logger.debug("Rematching node with cursor");
+          nodesToRematch = [];
+          logger.debug("Rematching nothing");
         }
       } else {
         nodesToRematch = getAllStatementNodes(newState.sliceDoc(0), config.parser);
-        logger.debug("Rematching everything");
+        logger.debug("Rematching all nodes");
       }
-    } else {
-      nodesToRematch = getAllStatementNodes(newState.sliceDoc(0), config.parser);
-      logger.debug("Rematching all nodes");
-    }
 
-    let allMatches: Match[] = [];
-    let allContextVariableRanges: ContextVariableRange[] = [];
-    for (const changedNode of nodesToRematch) {
-      const cursor = changedNode.walk();
+      for (const changedNode of nodesToRematch) {
+        const cursor = changedNode.walk();
+        const patternMatching = new PatternMatching(
+          config.projectionRegistry.rootProjectionPatternsByRootNodeType,
+          cursor,
+          config.globalContextVariables
+        );
+        const { matches, contextVariableRanges } = patternMatching.execute();
+        allMatches = allMatches.concat(matches);
+        allContextVariableRanges = allContextVariableRanges.concat(contextVariableRanges);
+      }
+      logger.debug("Done rematching. Rebuilding projections");
+    } else {
+      const cursor = config.parser.parse(newState.sliceDoc(0)).walk();
       const patternMatching = new PatternMatching(
         config.projectionRegistry.rootProjectionPatternsByRootNodeType,
         cursor,
@@ -153,7 +166,11 @@ export const projectionState = StateField.define<ProjectionState>({
       allMatches = allMatches.concat(matches);
       allContextVariableRanges = allContextVariableRanges.concat(contextVariableRanges);
     }
-    logger.debug("Done rematching. Rebuilding projections");
+    const endTime = Date.now();
+    if (RECORD) {
+      measurements.push(endTime - startTime);
+      console.log(measurements);
+    }
 
     const decorationSetBuilder = new DecorationSetBuilder();
     decorationSetBuilder
